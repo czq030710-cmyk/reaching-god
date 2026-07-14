@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import CharacterMotionCanvas from "./CharacterMotionCanvas";
 import WebGLAtmosphere from "./WebGLAtmosphere";
 import VideoWipeCanvas from "./VideoWipeCanvas";
 
@@ -103,10 +104,6 @@ const smoothstep = (edge0: number, edge1: number, value: number) => {
   const point = clamp((value - edge0) / (edge1 - edge0));
   return point * point * (3 - 2 * point);
 };
-const pulse = (center: number, radius: number, value: number) => (
-  Math.pow(clamp(1 - Math.abs(value - center) / radius), 2)
-);
-
 export default function CinematicExperience() {
   const rootRef = useRef<HTMLDivElement>(null);
   const videosRef = useRef<Array<HTMLVideoElement | null>>([]);
@@ -131,13 +128,6 @@ export default function CinematicExperience() {
     const reveal = smoothstep(0.63, 0.96, intro);
     const copyReveal = smoothstep(0.80, 1, intro);
     const heroOpacity = 1 - smoothstep(0.62, 0.94, intro);
-    const characterTravel = smoothstep(0.04, 0.84, intro);
-    const reaching = smoothstep(0.10, 0.68, intro);
-    const counterMotion = Math.sin(characterTravel * Math.PI);
-    const tailReaction = Math.sin(characterTravel * Math.PI * 2);
-    const maleBlink = pulse(0.39, 0.035, intro);
-    const catBlink = Math.max(pulse(0.27, 0.035, intro), pulse(0.57, 0.042, intro));
-    const fingerCurl = pulse(0.53, 0.15, intro);
     const nextActive = raw < 0.64 ? -1 : clamp(Math.round(raw) - 1, 0, chapters.length - 1);
 
     root.style.setProperty("--intro", intro.toFixed(4));
@@ -150,27 +140,6 @@ export default function CinematicExperience() {
     root.style.setProperty("--hero-scale", (1.02 + collapse * 0.035).toFixed(4));
     root.style.setProperty("--hero-contrast", (1 + etch * 1.35).toFixed(4));
     root.style.setProperty("--hero-brightness", (1 - etch * 0.34).toFixed(4));
-    root.style.setProperty("--male-travel-x", `${(-characterTravel * 3.2).toFixed(3)}vw`);
-    root.style.setProperty("--male-travel-y", `${(-counterMotion * 1.7).toFixed(3)}vh`);
-    root.style.setProperty("--male-travel-r", `${(-characterTravel * 1.05).toFixed(3)}deg`);
-    root.style.setProperty("--male-reach-arm-x", `${(reaching * 0.85).toFixed(3)}vw`);
-    root.style.setProperty("--male-reach-arm-r", `${(-reaching * 6.5).toFixed(3)}deg`);
-    root.style.setProperty("--male-rear-arm-r", `${(counterMotion * 5.4).toFixed(3)}deg`);
-    root.style.setProperty("--male-front-leg-r", `${(-counterMotion * 5.8).toFixed(3)}deg`);
-    root.style.setProperty("--male-back-leg-r", `${(counterMotion * 5.2).toFixed(3)}deg`);
-    root.style.setProperty("--male-hand-r", `${(-reaching * 2.8).toFixed(3)}deg`);
-    root.style.setProperty("--male-finger-r", `${(fingerCurl * 8).toFixed(3)}deg`);
-    root.style.setProperty("--male-blink", maleBlink.toFixed(4));
-    root.style.setProperty("--cat-travel-x", `${(characterTravel * 3.8).toFixed(3)}vw`);
-    root.style.setProperty("--cat-travel-y", `${(counterMotion * 0.9).toFixed(3)}vh`);
-    root.style.setProperty("--cat-travel-r", `${(characterTravel * 1.1).toFixed(3)}deg`);
-    root.style.setProperty("--cat-reach-x", `${(-reaching * 1.35).toFixed(3)}vw`);
-    root.style.setProperty("--cat-reach-r", `${(reaching * 3.8).toFixed(3)}deg`);
-    root.style.setProperty("--cat-reach-scale", (1 + reaching * 0.045).toFixed(4));
-    root.style.setProperty("--cat-front-leg-r", `${(-counterMotion * 4.6).toFixed(3)}deg`);
-    root.style.setProperty("--cat-hind-leg-r", `${(counterMotion * 4.2).toFixed(3)}deg`);
-    root.style.setProperty("--cat-tail-r", `${(-reaching * 6.2 + tailReaction * 2.4).toFixed(3)}deg`);
-    root.style.setProperty("--cat-blink", catBlink.toFixed(4));
     root.style.setProperty("--title-y", `${((1 - reveal) * 54).toFixed(3)}vh`);
     root.style.setProperty("--meta-y", `${((1 - reveal) * 13.5).toFixed(3)}vh`);
     root.style.setProperty("--edition-offset", `${((1 - collapse) * 18).toFixed(2)}px`);
@@ -347,26 +316,7 @@ export default function CinematicExperience() {
 
           <div className="hero-world" aria-hidden="true">
             <img className="hero-background" src="/assets/hero-layers/background.png" alt="" />
-            <div className="hero-character-object hero-character-object--male">
-              <span className="character-part male-part male-part--core" />
-              <span className="character-part male-part male-part--rear-arm" />
-              <span className="character-part male-part male-part--reach-arm" />
-              <span className="character-part male-part male-part--hand" />
-              <span className="character-part male-part male-part--fingers" />
-              <span className="character-part male-part male-part--front-leg" />
-              <span className="character-part male-part male-part--back-leg" />
-              <span className="character-blink male-blink male-blink--near" />
-              <span className="character-blink male-blink male-blink--far" />
-            </div>
-            <div className="hero-character-object hero-character-object--cat">
-              <span className="character-part cat-part cat-part--core" />
-              <span className="character-part cat-part cat-part--reach-paw" />
-              <span className="character-part cat-part cat-part--front-leg" />
-              <span className="character-part cat-part cat-part--hind-legs" />
-              <span className="character-part cat-part cat-part--tail" />
-              <span className="character-blink cat-blink cat-blink--near" />
-              <span className="character-blink cat-blink cat-blink--far" />
-            </div>
+            <CharacterMotionCanvas progress={clamp(scrollProgress)} />
             <div className="hero-etch" />
           </div>
 
