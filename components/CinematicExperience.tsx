@@ -18,6 +18,13 @@ type Chapter = {
   accent: string;
 };
 
+type AmbientRig = {
+  context: AudioContext;
+  master: GainNode;
+  oscillators: OscillatorNode[];
+  lfo: OscillatorNode;
+};
+
 const chapters: Chapter[] = [
   {
     number: "01",
@@ -96,10 +103,14 @@ const smoothstep = (edge0: number, edge1: number, value: number) => {
   const point = clamp((value - edge0) / (edge1 - edge0));
   return point * point * (3 - 2 * point);
 };
+const pulse = (center: number, radius: number, value: number) => (
+  Math.pow(clamp(1 - Math.abs(value - center) / radius), 2)
+);
 
 export default function CinematicExperience() {
   const rootRef = useRef<HTMLDivElement>(null);
   const videosRef = useRef<Array<HTMLVideoElement | null>>([]);
+  const ambientRef = useRef<AmbientRig | null>(null);
   const frameRef = useRef(0);
   const [scrollProgress, setScrollProgress] = useState(0);
   const [activeChapter, setActiveChapter] = useState(-1);
@@ -120,6 +131,13 @@ export default function CinematicExperience() {
     const reveal = smoothstep(0.63, 0.96, intro);
     const copyReveal = smoothstep(0.80, 1, intro);
     const heroOpacity = 1 - smoothstep(0.62, 0.94, intro);
+    const characterTravel = smoothstep(0.04, 0.84, intro);
+    const reaching = smoothstep(0.10, 0.68, intro);
+    const counterMotion = Math.sin(characterTravel * Math.PI);
+    const tailReaction = Math.sin(characterTravel * Math.PI * 2);
+    const maleBlink = pulse(0.39, 0.035, intro);
+    const catBlink = Math.max(pulse(0.27, 0.035, intro), pulse(0.57, 0.042, intro));
+    const fingerCurl = pulse(0.53, 0.15, intro);
     const nextActive = raw < 0.64 ? -1 : clamp(Math.round(raw) - 1, 0, chapters.length - 1);
 
     root.style.setProperty("--intro", intro.toFixed(4));
@@ -132,8 +150,27 @@ export default function CinematicExperience() {
     root.style.setProperty("--hero-scale", (1.02 + collapse * 0.035).toFixed(4));
     root.style.setProperty("--hero-contrast", (1 + etch * 1.35).toFixed(4));
     root.style.setProperty("--hero-brightness", (1 - etch * 0.34).toFixed(4));
-    root.style.setProperty("--left-shift", `${(-1.7 * etch).toFixed(3)}vw`);
-    root.style.setProperty("--right-shift", `${(1.7 * etch).toFixed(3)}vw`);
+    root.style.setProperty("--male-travel-x", `${(-characterTravel * 3.2).toFixed(3)}vw`);
+    root.style.setProperty("--male-travel-y", `${(-counterMotion * 1.7).toFixed(3)}vh`);
+    root.style.setProperty("--male-travel-r", `${(-characterTravel * 1.05).toFixed(3)}deg`);
+    root.style.setProperty("--male-reach-arm-x", `${(reaching * 0.85).toFixed(3)}vw`);
+    root.style.setProperty("--male-reach-arm-r", `${(-reaching * 6.5).toFixed(3)}deg`);
+    root.style.setProperty("--male-rear-arm-r", `${(counterMotion * 5.4).toFixed(3)}deg`);
+    root.style.setProperty("--male-front-leg-r", `${(-counterMotion * 5.8).toFixed(3)}deg`);
+    root.style.setProperty("--male-back-leg-r", `${(counterMotion * 5.2).toFixed(3)}deg`);
+    root.style.setProperty("--male-hand-r", `${(-reaching * 2.8).toFixed(3)}deg`);
+    root.style.setProperty("--male-finger-r", `${(fingerCurl * 8).toFixed(3)}deg`);
+    root.style.setProperty("--male-blink", maleBlink.toFixed(4));
+    root.style.setProperty("--cat-travel-x", `${(characterTravel * 3.8).toFixed(3)}vw`);
+    root.style.setProperty("--cat-travel-y", `${(counterMotion * 0.9).toFixed(3)}vh`);
+    root.style.setProperty("--cat-travel-r", `${(characterTravel * 1.1).toFixed(3)}deg`);
+    root.style.setProperty("--cat-reach-x", `${(-reaching * 1.35).toFixed(3)}vw`);
+    root.style.setProperty("--cat-reach-r", `${(reaching * 3.8).toFixed(3)}deg`);
+    root.style.setProperty("--cat-reach-scale", (1 + reaching * 0.045).toFixed(4));
+    root.style.setProperty("--cat-front-leg-r", `${(-counterMotion * 4.6).toFixed(3)}deg`);
+    root.style.setProperty("--cat-hind-leg-r", `${(counterMotion * 4.2).toFixed(3)}deg`);
+    root.style.setProperty("--cat-tail-r", `${(-reaching * 6.2 + tailReaction * 2.4).toFixed(3)}deg`);
+    root.style.setProperty("--cat-blink", catBlink.toFixed(4));
     root.style.setProperty("--title-y", `${((1 - reveal) * 54).toFixed(3)}vh`);
     root.style.setProperty("--meta-y", `${((1 - reveal) * 13.5).toFixed(3)}vh`);
     root.style.setProperty("--edition-offset", `${((1 - collapse) * 18).toFixed(2)}px`);
@@ -162,12 +199,91 @@ export default function CinematicExperience() {
   useEffect(() => {
     videosRef.current.forEach((video, index) => {
       if (!video) return;
-      video.muted = !soundOn;
+      video.muted = true;
+      video.defaultMuted = true;
+      video.volume = 0;
       const nearby = activeChapter < 0 ? index === 0 : Math.abs(index - activeChapter) <= 1;
       if (nearby) video.play().catch(() => undefined);
       else video.pause();
     });
-  }, [activeChapter, soundOn]);
+  }, [activeChapter]);
+
+  const createAmbientRig = useCallback(() => {
+    if (ambientRef.current) return ambientRef.current;
+
+    const context = new AudioContext();
+    const master = context.createGain();
+    const filter = context.createBiquadFilter();
+    const lfo = context.createOscillator();
+    const lfoDepth = context.createGain();
+    const oscillators: OscillatorNode[] = [];
+
+    master.gain.value = 0;
+    filter.type = "lowpass";
+    filter.frequency.value = 420;
+    filter.Q.value = 0.7;
+    lfo.type = "sine";
+    lfo.frequency.value = 0.055;
+    lfoDepth.gain.value = 45;
+    lfo.connect(lfoDepth);
+    lfoDepth.connect(filter.frequency);
+
+    [55, 82.41, 110, 164.81].forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      const voice = context.createGain();
+      oscillator.type = index < 2 ? "sine" : "triangle";
+      oscillator.frequency.value = frequency;
+      oscillator.detune.value = index % 2 ? 4 : -4;
+      voice.gain.value = [0.34, 0.18, 0.07, 0.035][index];
+      oscillator.connect(voice);
+      voice.connect(filter);
+      oscillator.start();
+      oscillators.push(oscillator);
+    });
+
+    filter.connect(master);
+    master.connect(context.destination);
+    lfo.start();
+
+    const rig = { context, master, oscillators, lfo };
+    ambientRef.current = rig;
+    return rig;
+  }, []);
+
+  const toggleAmbience = useCallback(async () => {
+    const enable = !soundOn;
+    if (!enable) {
+      const rig = ambientRef.current;
+      if (rig) {
+        const now = rig.context.currentTime;
+        rig.master.gain.cancelScheduledValues(now);
+        rig.master.gain.setValueAtTime(rig.master.gain.value, now);
+        rig.master.gain.linearRampToValueAtTime(0, now + 0.45);
+      }
+      setSoundOn(false);
+      return;
+    }
+
+    try {
+      const rig = createAmbientRig();
+      await rig.context.resume();
+      const now = rig.context.currentTime;
+      rig.master.gain.cancelScheduledValues(now);
+      rig.master.gain.setValueAtTime(rig.master.gain.value, now);
+      rig.master.gain.linearRampToValueAtTime(0.075, now + 1.4);
+      setSoundOn(true);
+    } catch {
+      setSoundOn(false);
+    }
+  }, [createAmbientRig, soundOn]);
+
+  useEffect(() => () => {
+    const rig = ambientRef.current;
+    if (!rig) return;
+    rig.oscillators.forEach((oscillator) => oscillator.stop());
+    rig.lfo.stop();
+    rig.context.close().catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     document.body.classList.toggle("menu-is-open", menuOpen);
@@ -187,12 +303,15 @@ export default function CinematicExperience() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
-  const chapterScene = clamp(scrollProgress - 1, 0, chapters.length - 1);
-  const lowerChapter = Math.floor(chapterScene);
-  const upperChapter = Math.min(lowerChapter + 1, chapters.length - 1);
-  const chapterLocal = chapterScene - lowerChapter;
-  const wipeTop = 100 - chapterLocal * 112;
-  const wipeBottom = 100 - chapterLocal * 102;
+  const replayActiveFilm = useCallback(() => {
+    const video = videosRef.current[Math.max(activeChapter, 0)];
+    if (!video) return;
+    video.muted = true;
+    video.defaultMuted = true;
+    video.volume = 0;
+    video.currentTime = 0;
+    video.play().catch(() => undefined);
+  }, [activeChapter]);
 
   return (
     <div className="cinematic-root" ref={rootRef}>
@@ -204,12 +323,7 @@ export default function CinematicExperience() {
         <div className="stage" id="experience-stage">
           <div className="video-stack" aria-hidden={activeChapter < 0}>
             {chapters.map((chapter, index) => {
-              const isLower = index === lowerChapter;
-              const isUpper = index === upperChapter && upperChapter !== lowerChapter;
-              const opacity = isLower || isUpper ? 1 : 0;
-              const clipPath = isUpper
-                ? `polygon(${wipeTop}% 0, 100% 0, 100% 100%, ${wipeBottom}% 100%)`
-                : "inset(0)";
+              const isActive = index === Math.max(activeChapter, 0);
               return (
                 <video
                   key={chapter.title}
@@ -219,22 +333,40 @@ export default function CinematicExperience() {
                   className="chapter-video"
                   crossOrigin="anonymous"
                   src={chapter.video}
-                  style={{ opacity, clipPath, zIndex: isUpper ? 2 : isLower ? 1 : 0 }}
+                  style={{ opacity: isActive ? 1 : 0, zIndex: isActive ? 1 : 0 }}
                   preload={index < 2 ? "auto" : "metadata"}
                   autoPlay
                   loop
-                  muted={!soundOn}
+                  muted
                   playsInline
                 />
               );
             })}
           </div>
-          <VideoWipeCanvas progress={scrollProgress} videosRef={videosRef} />
+          <VideoWipeCanvas activeIndex={Math.max(activeChapter, 0)} videosRef={videosRef} />
 
           <div className="hero-world" aria-hidden="true">
-            <img className="hero-art" src="/assets/aifx-renaissance-hero.png" alt="" />
-            <div className="hero-fragment hero-fragment--left" />
-            <div className="hero-fragment hero-fragment--right" />
+            <img className="hero-background" src="/assets/hero-layers/background.png" alt="" />
+            <div className="hero-character-object hero-character-object--male">
+              <span className="character-part male-part male-part--core" />
+              <span className="character-part male-part male-part--rear-arm" />
+              <span className="character-part male-part male-part--reach-arm" />
+              <span className="character-part male-part male-part--hand" />
+              <span className="character-part male-part male-part--fingers" />
+              <span className="character-part male-part male-part--front-leg" />
+              <span className="character-part male-part male-part--back-leg" />
+              <span className="character-blink male-blink male-blink--near" />
+              <span className="character-blink male-blink male-blink--far" />
+            </div>
+            <div className="hero-character-object hero-character-object--cat">
+              <span className="character-part cat-part cat-part--core" />
+              <span className="character-part cat-part cat-part--reach-paw" />
+              <span className="character-part cat-part cat-part--front-leg" />
+              <span className="character-part cat-part cat-part--hind-legs" />
+              <span className="character-part cat-part cat-part--tail" />
+              <span className="character-blink cat-blink cat-blink--near" />
+              <span className="character-blink cat-blink cat-blink--far" />
+            </div>
             <div className="hero-etch" />
           </div>
 
@@ -262,10 +394,10 @@ export default function CinematicExperience() {
               className="sound-toggle"
               type="button"
               aria-pressed={soundOn}
-              onClick={() => setSoundOn((enabled) => !enabled)}
+              onClick={toggleAmbience}
             >
               <span className="sound-bars" aria-hidden="true"><i /><i /><i /><i /></span>
-              {soundOn ? "Sound on" : "Sound off"}
+              {soundOn ? "Ambience on" : "Ambience off"}
             </button>
             <a className="project-link" href="mailto:hello@aifx.studio">
               Start a project
@@ -344,12 +476,12 @@ export default function CinematicExperience() {
               <div className="gate-client-logo-wrapper">
                 <img
                   className="gate-client-logo"
-                  src={`/assets/logos/${Math.max(activeChapter, 0) + 1}.png`}
+                  src={`/assets/logos-normalized/${Math.max(activeChapter, 0) + 1}.png`}
                   alt={active.client}
                 />
               </div>
             </div>
-            <button className="ritual-button" type="button" onClick={() => setSoundOn(true)}>
+            <button className="ritual-button" type="button" onClick={replayActiveFilm}>
               <span>{active.action}</span>
             </button>
           </div>

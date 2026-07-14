@@ -43,9 +43,11 @@ const fragmentSource = `
 
     // The source showcase's diagonal right-to-left chapter wipe.
     float tilt = 0.115 * (v_uv.y - 0.5);
-    float boundary = 1.0 - u_local + tilt;
-    float mask = smoothstep(boundary - 0.025, boundary + 0.025, v_uv.x);
+    float boundary = 1.08 - u_local * 1.16 + tilt;
+    float mask = smoothstep(boundary - 0.022, boundary + 0.022, v_uv.x);
     vec3 color = mix(colorA, colorB, mask);
+    float seam = exp(-abs(v_uv.x - boundary) * 82.0) * pulse;
+    color += vec3(0.82, 0.67, 0.42) * seam * 0.08;
     gl_FragColor = vec4(color, 1.0);
   }
 `;
@@ -86,17 +88,46 @@ function makeTexture(gl: WebGLRenderingContext, unit: number) {
 }
 
 type Props = {
-  progress: number;
+  activeIndex: number;
   videosRef: RefObject<Array<HTMLVideoElement | null>>;
 };
 
-export default function VideoWipeCanvas({ progress, videosRef }: Props) {
+type TransitionState = {
+  from: number;
+  to: number;
+  startedAt: number;
+  duration: number;
+};
+
+const easeInOutCubic = (value: number) => (
+  value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2
+);
+
+export default function VideoWipeCanvas({ activeIndex, videosRef }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const progressRef = useRef(progress);
+  const transitionRef = useRef<TransitionState>({
+    from: activeIndex,
+    to: activeIndex,
+    startedAt: -1,
+    duration: 1050,
+  });
 
   useEffect(() => {
-    progressRef.current = progress;
-  }, [progress]);
+    const previous = transitionRef.current;
+    const now = performance.now();
+    const elapsed = previous.startedAt < 0 ? 1 : (now - previous.startedAt) / previous.duration;
+    const dominantFrame = easeInOutCubic(Math.min(1, Math.max(0, elapsed))) >= 0.5
+      ? previous.to
+      : previous.from;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    transitionRef.current = {
+      from: dominantFrame,
+      to: activeIndex,
+      startedAt: dominantFrame === activeIndex ? -1 : 0,
+      duration: reducedMotion ? 1 : 1050,
+    };
+  }, [activeIndex]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -172,14 +203,25 @@ export default function VideoWipeCanvas({ progress, videosRef }: Props) {
 
     const render = () => {
       const videos = videosRef.current ?? [];
-      const scene = Math.min(4, Math.max(0, progressRef.current - 1));
-      const lower = Math.floor(scene);
-      const upper = Math.min(lower + 1, 4);
-      const local = scene - lower;
-      const videoA = videos[lower];
-      const videoB = videos[upper];
+      const transition = transitionRef.current;
+      const from = Math.min(4, Math.max(0, transition.from));
+      const to = Math.min(4, Math.max(0, transition.to));
+      const videoA = videos[from];
+      const videoB = videos[to];
       const readyA = Boolean(videoA && videoA.readyState >= 2 && videoA.videoWidth > 0);
       const readyB = Boolean(videoB && videoB.readyState >= 2 && videoB.videoWidth > 0);
+      let local = from === to ? 1 : 0;
+
+      if (from !== to && readyA && readyB) {
+        const now = performance.now();
+        if (transition.startedAt === 0) transition.startedAt = now;
+        const elapsed = Math.min(1, Math.max(0, (now - transition.startedAt) / transition.duration));
+        local = easeInOutCubic(elapsed);
+        if (elapsed >= 1) {
+          transition.from = transition.to;
+          transition.startedAt = -1;
+        }
+      }
 
       const ratio = Math.min(window.devicePixelRatio || 1, 1.6);
       const width = Math.round(canvas.clientWidth * ratio);
@@ -194,8 +236,8 @@ export default function VideoWipeCanvas({ progress, videosRef }: Props) {
       gl.clear(gl.COLOR_BUFFER_BIT);
 
       if (readyA) {
-        if (lower !== lowerIndex) {
-          lowerIndex = lower;
+        if (from !== lowerIndex) {
+          lowerIndex = from;
           resetTexture(textureA, gl.TEXTURE0);
         }
         gl.activeTexture(gl.TEXTURE0);
@@ -209,8 +251,8 @@ export default function VideoWipeCanvas({ progress, videosRef }: Props) {
       }
 
       if (readyB) {
-        if (upper !== upperIndex) {
-          upperIndex = upper;
+        if (to !== upperIndex) {
+          upperIndex = to;
           resetTexture(textureB, gl.TEXTURE1);
         }
         gl.activeTexture(gl.TEXTURE1);
